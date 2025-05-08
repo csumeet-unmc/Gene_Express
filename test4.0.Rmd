@@ -1,0 +1,197 @@
+---
+title: "test3.0"
+author: "Charitha Sumeet"
+date: "`r Sys.Date()`"
+output: html_document
+---
+```{r}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+#Working Directory
+```{r}
+setwd("~/unmc")
+```
+
+#Libraries
+```{r}
+library(BiocManager)
+library(dplyr)
+library(ggplot2)
+library(tidyr)
+```
+
+#Input dataset
+```{r}
+# To give user input for this data 2 things are important - 
+#1. Make sure the files are in csv format
+#let the user name sure the row name of metadata and the colnames of the exp_matrix are alike
+
+#To streamline our analysis I am going to be making changes using r codes , but for implementation lets make it simple
+
+#GSE235874_QC_BQC_Q3Norm_matrixonly.csv
+d1 <- readline(prompt = "Upload your Expression matrix file: ")
+exp_matrix <- read.csv(d1, header = TRUE, row.names = NULL, check.names = FALSE)
+head(exp_matrix,20)
+
+#GSE235874_segmentSummary_readTypes.csv
+d2 <- readline(prompt = "Upload your Meta data file: ")
+meta_data_df<- read.csv(d2, header = TRUE, row.names = NULL, check.names = FALSE, colClasses = "character")
+head(meta_data_df)
+
+#Need to add this chunk to streamline and make the exp_matrix colnames and metadata 1st column name look alike
+meta_data_df <- meta_data %>%
+  mutate(sample_name = paste0(`Scan name`, " | ", `ROI name`, " | ", `Segment name`))%>%
+  relocate(sample_name, .before = `Scan name`)  
+head(meta_data_df,20)
+
+
+```
+
+#Select the gene
+```{r}
+# Get unique genes from the TargetName column
+uniq_genes <- unique(exp_matrix$TargetName)
+print(uniq_genes)
+
+# Prompt user to type comma-separated genes
+choose_genes <- readline(prompt = "Type the genes (comma-separated): ")
+
+
+# Split the input string into a list of gene names and trim whitespace
+gene_list <- trimws(unlist(strsplit(choose_genes, ",")))
+
+# Create a regex pattern to match any of the selected genes
+gene_pattern <- paste(paste0("^", gene_list, "$"), collapse = "|")
+
+# Subset the data frame where TargetName matches any of the selected genes
+exp_matrix_df <- subset(
+  exp_matrix,
+  grepl(gene_pattern, as.character(TargetName))
+)
+
+# Show the filtered data
+print(exp_matrix_df)
+
+
+```
+
+
+# Wrangle the data 
+```{r}
+
+#Using tidyverse changes the data from class data frame to class tibble - ( need to convert it back )
+
+exp_matrix_df <- exp_matrix_df %>%
+  pivot_longer(
+    cols = -TargetName,
+    names_to = "Sample_id",
+    values_to = "Expression"
+  ) %>%
+  relocate(Sample_id, .before = TargetName)  
+exp_matrix_df <- as.data.frame(exp_matrix_df)
+
+
+
+
+#Choose the column from meta data
+
+
+#Merged dataset (Match has a vlookup function like in excel) to match the sample id's in both expression and metadata dataframes
+
+#var_sel is an important variable, because that is what the user selects to view 
+
+merge_df<- exp_matrix_df
+head(merge_df)
+
+choose_colnames <- as.list(names(meta_data_df))
+selected_option <- menu(choose_colnames, title = "Select parameter: ")
+var_sel<-(paste(choose_colnames[selected_option]))
+var_sel
+
+# Step 3: Clean matching columns
+# Rename 'Scan name' for easier access (optional but recommended)
+names(meta_data_df)[names(meta_data_df) == "Scan name"] <- "sample_name"
+
+# Ensure character and trim spaces
+exp_matrix_df$Sample_id <- trimws(as.character(exp_matrix_df$Sample_id))
+meta_data_df$sample_name <- trimws(as.character(meta_data_df$sample_name))
+
+# Step 4: Merge (vlookup-style)
+merge_df <- exp_matrix_df
+merge_df[[var_sel]] <- meta_data_df[[var_sel]][
+  match(merge_df$Sample_id, meta_data_df$sample_name)
+]
+
+# Step 5: View result
+head(merge_df, 20)
+```
+
+
+
+
+
+#Plot Bar-chart
+##Based on log2 of Average gene expression
+```{r}
+
+# Compute summary
+summary_df <- merge_df %>%
+  group_by(TargetName) %>%
+  summarise(avg_expression = mean(Expression, na.rm = TRUE), .groups = "drop") %>%
+  mutate(log_of_average_expression = log2(avg_expression)) %>%
+  arrange((log_of_average_expression)) 
+
+# Lock in the display order 
+summary_df$TargetName <- factor(summary_df$TargetName, levels = summary_df$TargetName)
+
+# Plot Barchart
+ggplot(summary_df, aes(x = TargetName, y = log_of_average_expression)) +
+  geom_bar(stat = "identity", fill = "skyblue") +
+  geom_text(aes(label = round(log_of_average_expression, 2)), 
+            hjust = -0.1, size = 4) +
+  labs(title = "Log2(Average Gene Expression)",
+       x = "Gene (TargetName)",
+       y = "Log2(Average Expression)") +
+  theme_minimal() +
+  coord_flip()
+
+
+```
+
+##Based on treatment time
+```{r}
+
+#Specify the order if needed - need to give space
+
+group_treat <- merge_df %>%
+  group_by(Sample, TargetName) %>%
+  summarise(
+    avg_expression = mean(Expression, na.rm = TRUE),
+    .groups = "drop"
+  ) %>%
+  mutate(
+    log2_avg_expression = log2(avg_expression)
+  )
+
+#Plot Barchart
+ggplot(group_treat, aes(x = Sample, y = log2_avg_expression, fill = TargetName)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  geom_text(aes(label = round(log2_avg_expression, 2)), 
+            position = position_dodge(width = 0.9),
+            vjust = -0.3, size = 3) +
+  labs(
+    title = "Log2(Average Gene Expression) by Sample and Gene",
+    x = "Sample",
+    y = "Log2(Average Expression)"
+  ) +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    legend.title = element_blank()
+  )
+
+```
+
+
