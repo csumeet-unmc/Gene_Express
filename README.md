@@ -1,2 +1,2 @@
 # Gene_Express
-Automate Visualising Gene Expression Data by creating an R Shiny application
+An R application that helps Visualise Spatial Gene Expression Data of Pacreatic Ductal Adenocarcinoma 
